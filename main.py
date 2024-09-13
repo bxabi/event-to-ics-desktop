@@ -23,7 +23,7 @@ if os.path.exists('.env'):
 def ask_gpt(prompt):
     client = OpenAI()  # The key is taken from os.environ.get("OPENAI_API_KEY")
     chat_completion = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model="gpt-4o",
         messages=[{"role": "user", "content": prompt}]
     )
     return chat_completion.choices[0].message.content
@@ -51,14 +51,14 @@ def click():
     progress_bar.start()
 
     def threaded_process():
-        text = event_field.get("0.0", tk.END)
+        text = event_field.get("1.0", tk.END)
         prompt = "Create an ics file from the following event description. I only need the content of the ics file, no additional text, no ics markdown. "
         prompt += "Today's date is " + str(datetime.date.today()) + ". "
         prompt += "My time zone is " + str(datetime.datetime.now().astimezone().tzinfo) + ". "
         prompt += "The event: " + text
         try:
             response = ask_gpt(prompt)
-            window.after(0, lambda: ics_field.replace("0.0", tk.END, response))
+            window.after(0, lambda: ics_field.replace("1.0", tk.END, response))
         except Exception as e:
             window.after(0, lambda: messagebox.showerror("Error", str(e)))
         finally:
@@ -76,7 +76,7 @@ def click():
 
 def add_to_calendar():
     with open(tmpFile, 'w') as file:
-        file.write(ics_field.get("0.0", tk.END))
+        file.write(ics_field.get("1.0", tk.END))
     open_ics_file(tmpFile)
 
 
@@ -87,6 +87,17 @@ window.iconphoto(True, icon)
 
 event_field = tk.Text(window, height=10)
 event_field.pack()
+
+
+def select_all(event):
+    event.widget.tag_add(tk.SEL, "1.0", tk.END)
+    event.widget.mark_set(tk.INSERT, "1.0")
+    event.widget.see(tk.INSERT)
+    return 'break'
+
+
+event_field.bind('<Control-a>', select_all)
+event_field.bind('<Control-A>', select_all)
 
 ics_field = tk.Text(window, height=10)
 ics_field.pack()
