@@ -31,17 +31,17 @@ def ask_gpt(prompt):
 
 def open_ics_file(ics_file_path):
     os_name = platform.system()
-
     if os_name == 'Windows':
         command = ['start', ics_file_path]
+        subprocess.call(command, shell=True)
     elif os_name == 'Darwin':  # macOS
         command = ['open', ics_file_path]
+        subprocess.call(command)
     elif os_name == 'Linux':
         command = ['xdg-open', ics_file_path]
+        subprocess.call(command)
     else:
         raise ValueError("Unsupported operating system: " + os_name)
-
-    subprocess.call(command)
 
 
 def click():
@@ -60,7 +60,8 @@ def click():
             response = ask_gpt(prompt)
             window.after(0, lambda: ics_field.replace("1.0", tk.END, response))
         except Exception as e:
-            window.after(0, lambda: messagebox.showerror("Error", str(e)))
+            err = str(e)
+            window.after(0, lambda: messagebox.showerror("Error", err))
         finally:
             window.after(0, cleanup)
 
