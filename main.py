@@ -22,12 +22,14 @@ if os.path.exists('.env'):
 
 def ask_gpt(text, reminder):
     prompt = ("Create an ics file from the following event description. I only need the content of the ics file, "
-              "no additional text, no ics markdown.")
+              "no additional characters, no markdown, no ```plaintext")
     prompt += "Today's date is " + str(datetime.date.today()) + ". "
     prompt += "My time zone is " + str(datetime.datetime.now().astimezone().tzinfo) + ". "
     prompt += "The event: " + text + ". "
     if reminder != "":
         prompt += "The reminder: " + reminder
+    else:
+        prompt += "No reminder"
 
     client = OpenAI()  # The key is taken from os.environ.get("OPENAI_API_KEY")
     chat_completion = client.chat.completions.create(
