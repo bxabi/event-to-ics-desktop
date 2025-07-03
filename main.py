@@ -125,6 +125,14 @@ def toggle_ics():
 event_field.bind('<Control-a>', select_all)
 event_field.bind('<Control-A>', select_all)
 
+event_menu = tk.Menu(window, tearoff=0)
+event_menu.add_command(label="Paste", command=lambda: event_field.event_generate("<<Paste>>"))
+
+def show_event_menu(event):
+    event_menu.tk_popup(event.x_root, event.y_root)
+
+event_field.bind("<Button-3>", show_event_menu)
+
 ics_label = tk.Label(window, text="ICS:")
 ics_field = tk.Text(window, height=10)
 
