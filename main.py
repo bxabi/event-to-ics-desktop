@@ -4,9 +4,11 @@ import platform
 import subprocess
 import threading
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, filedialog
 import tkinter.ttk as ttk
+import base64
 
+from tkinterdnd2 import DND_FILES, TkinterDnD
 from openai import OpenAI
 
 tmpFile = os.path.expanduser("~") + "/.event-ai.ics"
@@ -31,11 +33,19 @@ def ask_gpt(text, reminder):
     else:
         prompt += "No reminder"
 
+    messages = [{"role": "user",
+                 "content": [
+                     {"type": "text", "text": prompt},
+                 ]}]
+
+    if file_path != "":
+        with open(file_path, "rb") as image_file:
+            base64_image = base64.b64encode(image_file.read()).decode('utf-8')
+        image_url = f"data:image/png;base64,{base64_image}"
+        messages[0]["content"].append({"type": "image_url", "image_url": {"url": image_url}})
+
     client = OpenAI()  # The key is taken from os.environ.get("OPENAI_API_KEY")
-    chat_completion = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[{"role": "user", "content": prompt}]
-    )
+    chat_completion = client.chat.completions.create(model="gpt-4.1", messages=messages)
     return chat_completion.choices[0].message.content
 
 
@@ -63,21 +73,26 @@ def click():
     def threaded_process():
         text = event_field.get("1.0", tk.END)
         reminder = reminder_field.get("1.0", tk.END)
+        success = False
         try:
             response = ask_gpt(text, reminder)
             window.after(0, lambda: ics_field.replace("1.0", tk.END, response))
+            success = True
         except Exception as e:
             err = str(e)
+            print(err)
             window.after(0, lambda: messagebox.showerror("Error", err))
-        finally:
-            window.after(0, cleanup)
 
-    def cleanup():
+        finally:
+            window.after(0, cleanup(success))
+
+    def cleanup(success: bool):
         progress_bar.stop()
         progress_bar.pack_forget()
         generate_button.config(state="normal")
         show_ics.config(state="normal")
-        add_to_calendar()
+        if success:
+            add_to_calendar()
 
     thread = threading.Thread(target=threaded_process)
     thread.start()
@@ -89,7 +104,7 @@ def add_to_calendar():
     open_ics_file(tmpFile)
 
 
-window = tk.Tk()
+window = TkinterDnD.Tk()
 window.title("Text to ICS")
 icon = tk.PhotoImage(file="icon.png")
 window.iconphoto(True, icon)
@@ -128,10 +143,37 @@ event_field.bind('<Control-A>', select_all)
 event_menu = tk.Menu(window, tearoff=0)
 event_menu.add_command(label="Paste", command=lambda: event_field.event_generate("<<Paste>>"))
 
+
 def show_event_menu(event):
     event_menu.tk_popup(event.x_root, event.y_root)
 
+
 event_field.bind("<Button-3>", show_event_menu)
+
+file_path = ""
+
+
+def on_drop(event):
+    global file_path
+    file_path = event.data  # This is the path of the dropped file
+    print("Dropped file:", file_path)
+    event_field.insert(tk.END, f"\nFile: {file_path}\n")
+
+
+event_field.drop_target_register(DND_FILES)
+event_field.dnd_bind('<<Drop>>', on_drop)
+
+
+def choose_file():
+    global file_path
+    file_path = filedialog.askopenfilename(
+        filetypes=[("Image files", "*.jpg *.png *.jpeg *.JPG *.PNG *.JPEG")], initialdir= os.path.expanduser("~") + "/Desktop"
+    )
+    event_field.insert(tk.END, f"\nFile: {file_path}\n")
+
+
+file_open = tk.Button(window, text="Choose Image…", command=choose_file)
+file_open.pack()
 
 ics_label = tk.Label(window, text="ICS:")
 ics_field = tk.Text(window, height=10)
