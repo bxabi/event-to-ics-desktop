@@ -1,191 +1,188 @@
-import datetime
+import sys
 import os
 import platform
 import subprocess
-import threading
-import tkinter as tk
-from tkinter import messagebox, filedialog
-import tkinter.ttk as ttk
-import base64
 
-from tkinterdnd2 import DND_FILES, TkinterDnD
-from openai import OpenAI
+from PyQt6.QtWidgets import (
+    QApplication, QWidget, QLabel, QTextEdit, QPushButton, QVBoxLayout,
+    QHBoxLayout, QFileDialog, QMessageBox, QProgressBar, QMenu
+)
+from PyQt6.QtGui import QIcon, QDragEnterEvent, QDropEvent, QAction
+from PyQt6.QtCore import Qt, pyqtSignal, QObject, QThread
 
-tmpFile = os.path.expanduser("~") + "/.event-ai.ics"
-
-if os.path.exists('.env'):
-    with open('.env') as file:
-        for line in file:
-            line = line.strip()
-            if line and not line.startswith('#'):
-                key, value = line.split('=', 1)
-                os.environ[key.strip()] = value.strip()
+from ai import ask_gpt
 
 
-def ask_gpt(text, reminder):
-    prompt = ("Create an ics file from the following event description. I only need the content of the ics file, "
-              "no additional characters, no markdown, no ```plaintext")
-    prompt += "Today's date is " + str(datetime.date.today()) + ". "
-    prompt += "My time zone is " + str(datetime.datetime.now().astimezone().tzinfo) + ". "
-    prompt += "The event: " + text + ". "
-    if reminder != "":
-        prompt += "The reminder: " + reminder
-    else:
-        prompt += "No reminder"
+class Worker(QObject):
+    finished = pyqtSignal(str, bool)
 
-    messages = [{"role": "user",
-                 "content": [
-                     {"type": "text", "text": prompt},
-                 ]}]
+    def __init__(self, text, reminder, file_path):
+        super().__init__()
+        self.text = text
+        self.reminder = reminder
+        self.file_path = file_path
 
-    if file_path != "":
-        with open(file_path, "rb") as image_file:
-            base64_image = base64.b64encode(image_file.read()).decode('utf-8')
-        image_url = f"data:image/png;base64,{base64_image}"
-        messages[0]["content"].append({"type": "image_url", "image_url": {"url": image_url}})
+    def run(self):
+        try:
+            result = ask_gpt(self.text, self.reminder, self.file_path)
+            self.finished.emit(result, True)
+        except Exception as e:
+            self.finished.emit(str(e), False)
 
-    client = OpenAI()  # The key is taken from os.environ.get("OPENAI_API_KEY")
-    chat_completion = client.chat.completions.create(model="gpt-4.1", messages=messages)
-    return chat_completion.choices[0].message.content
+
+class DropTextEdit(QTextEdit):
+    fileDropped = pyqtSignal(str)
+
+    def __init__(self):
+        super().__init__()
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dropEvent(self, event: QDropEvent):
+        if event.mimeData().hasUrls():
+            urls = event.mimeData().urls()
+            if urls:
+                file_path = urls[0].toLocalFile()
+                self.fileDropped.emit(file_path)
+        else:
+            super().dropEvent(event)
 
 
 def open_ics_file(ics_file_path):
     os_name = platform.system()
     if os_name == 'Windows':
-        command = ['start', ics_file_path]
-        subprocess.call(command, shell=True)
-    elif os_name == 'Darwin':  # macOS
-        command = ['open', ics_file_path]
-        subprocess.call(command)
+        subprocess.call(['start', ics_file_path], shell=True)
+    elif os_name == 'Darwin':
+        subprocess.call(['open', ics_file_path])
     elif os_name == 'Linux':
-        command = ['xdg-open', ics_file_path]
-        subprocess.call(command)
+        subprocess.call(['xdg-open', ics_file_path])
     else:
         raise ValueError("Unsupported operating system: " + os_name)
 
 
-def click():
-    generate_button.config(state="disabled")
-    show_ics.config(state="disabled")
-    progress_bar.pack()
-    progress_bar.start()
+class MainWindow(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Text to ICS")
+        self.setWindowIcon(QIcon("icon.png"))
+        self.file_path = ""
+        self.init_ui()
 
-    def threaded_process():
-        text = event_field.get("1.0", tk.END)
-        reminder = reminder_field.get("1.0", tk.END)
-        success = False
-        try:
-            response = ask_gpt(text, reminder)
-            window.after(0, lambda: ics_field.replace("1.0", tk.END, response))
-            success = True
-        except Exception as e:
-            err = str(e)
-            print(err)
-            window.after(0, lambda: messagebox.showerror("Error", err))
+    def init_ui(self):
+        layout = QVBoxLayout()
 
-        finally:
-            window.after(0, cleanup(success))
+        self.event_label = QLabel("Event Description:")
+        layout.addWidget(self.event_label)
+        self.event_field = DropTextEdit()
+        layout.addWidget(self.event_field)
+        self.event_field.fileDropped.connect(self.on_file_dropped)
 
-    def cleanup(success: bool):
-        progress_bar.stop()
-        progress_bar.pack_forget()
-        generate_button.config(state="normal")
-        show_ics.config(state="normal")
+        self.reminder_label = QLabel("Reminder:")
+        layout.addWidget(self.reminder_label)
+        self.reminder_field = QTextEdit()
+        self.reminder_field.setFixedHeight(40)
+        layout.addWidget(self.reminder_field)
+
+        self.file_button = QPushButton("Choose Image…")
+        self.file_button.clicked.connect(self.choose_file)
+        layout.addWidget(self.file_button)
+
+        self.ics_label = QLabel("ICS:")
+        self.ics_field = QTextEdit()
+        self.ics_field.setVisible(False)
+        self.ics_label.setVisible(False)
+        layout.addWidget(self.ics_label)
+        layout.addWidget(self.ics_field)
+
+        button_layout = QHBoxLayout()
+        self.generate_button = QPushButton("Generate")
+        self.generate_button.clicked.connect(self.generate_click)
+        button_layout.addWidget(self.generate_button)
+
+        self.show_ics = QPushButton("Show the ICS")
+        self.show_ics.setEnabled(False)
+        self.show_ics.clicked.connect(self.toggle_ics)
+        button_layout.addWidget(self.show_ics)
+        layout.addLayout(button_layout)
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        layout.addWidget(self.progress_bar)
+
+        self.setLayout(layout)
+
+        # Context menu for event_field
+        self.event_field.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.event_field.customContextMenuRequested.connect(self.show_event_menu)
+
+    def show_event_menu(self, pos):
+        menu = QMenu(self)
+        paste_action = QAction("Paste", self)
+        paste_action.triggered.connect(lambda: self.event_field.paste())
+        menu.addAction(paste_action)
+        menu.exec(self.event_field.mapToGlobal(pos))
+
+    def choose_file(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Choose Image", os.path.expanduser("~") + "/Desktop",
+            "Image files (*.jpg *.png *.jpeg *.JPG *.PNG *.JPEG)"
+        )
+        if file_path:
+            self.file_path = file_path
+            self.event_field.append(f"\nFile: {file_path}\n")
+
+    def on_file_dropped(self, file_path):
+        self.file_path = file_path
+        self.event_field.append(f"\nFile: {file_path}\n")
+
+    def generate_click(self):
+        self.generate_button.setEnabled(False)
+        self.show_ics.setEnabled(False)
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 0)  # Indeterminate
+
+        text = self.event_field.toPlainText()
+        reminder = self.reminder_field.toPlainText()
+        self.worker = Worker(text, reminder, self.file_path)
+        self.thread = QThread()
+        self.worker.moveToThread(self.thread)
+        self.thread.started.connect(self.worker.run)
+        self.worker.finished.connect(self.on_finished)
+        self.worker.finished.connect(self.thread.quit)
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.thread.finished.connect(self.thread.deleteLater)
+        self.thread.start()
+
+    def on_finished(self, result, success):
+        self.progress_bar.setVisible(False)
+        self.generate_button.setEnabled(True)
+        self.show_ics.setEnabled(True)
         if success:
-            add_to_calendar()
+            self.ics_field.setPlainText(result)
+            self.add_to_calendar()
+        else:
+            QMessageBox.critical(self, "Error", result)
 
-    thread = threading.Thread(target=threaded_process)
-    thread.start()
+    def add_to_calendar(self):
+        tmp_file = os.path.expanduser("~") + "/.event-ai.ics"
+        with open(tmp_file, 'w') as f:
+            f.write(self.ics_field.toPlainText())
+        open_ics_file(tmp_file)
 
-
-def add_to_calendar():
-    with open(tmpFile, 'w') as f:
-        f.write(ics_field.get("1.0", tk.END))
-    open_ics_file(tmpFile)
-
-
-window = TkinterDnD.Tk()
-window.title("Text to ICS")
-icon = tk.PhotoImage(file="icon.png")
-window.iconphoto(True, icon)
-
-event_label = tk.Label(window, text="Event Description:")
-event_label.pack(pady=(10, 0))
-event_field = tk.Text(window, height=10)
-event_field.pack()
-reminder_label = tk.Label(window, text="Reminder:")
-reminder_label.pack(pady=(10, 0))
-reminder_field = tk.Text(window, height=2)
-reminder_field.pack()
+    def toggle_ics(self):
+        visible = not self.ics_field.isVisible()
+        self.ics_field.setVisible(visible)
+        self.ics_label.setVisible(visible)
+        self.show_ics.setText("Hide the ICS" if visible else "Show the ICS")
 
 
-def select_all(event):
-    event.widget.tag_add(tk.SEL, "1.0", tk.END)
-    event.widget.mark_set(tk.INSERT, "1.0")
-    event.widget.see(tk.INSERT)
-    return 'break'
-
-
-def toggle_ics():
-    if ics_label.winfo_viewable():
-        ics_label.pack_forget()
-        ics_field.pack_forget()
-        show_ics.config(text="Show the ICS")
-    else:
-        ics_label.pack(pady=(10, 0))
-        ics_field.pack()
-        show_ics.config(text="Hide the ICS")
-
-
-event_field.bind('<Control-a>', select_all)
-event_field.bind('<Control-A>', select_all)
-
-event_menu = tk.Menu(window, tearoff=0)
-event_menu.add_command(label="Paste", command=lambda: event_field.event_generate("<<Paste>>"))
-
-
-def show_event_menu(event):
-    event_menu.tk_popup(event.x_root, event.y_root)
-
-
-event_field.bind("<Button-3>", show_event_menu)
-
-file_path = ""
-
-
-def on_drop(event):
-    global file_path
-    file_path = event.data  # This is the path of the dropped file
-    print("Dropped file:", file_path)
-    event_field.insert(tk.END, f"\nFile: {file_path}\n")
-
-
-event_field.drop_target_register(DND_FILES)
-event_field.dnd_bind('<<Drop>>', on_drop)
-
-
-def choose_file():
-    global file_path
-    file_path = filedialog.askopenfilename(
-        filetypes=[("Image files", "*.jpg *.png *.jpeg *.JPG *.PNG *.JPEG")], initialdir= os.path.expanduser("~") + "/Desktop"
-    )
-    event_field.insert(tk.END, f"\nFile: {file_path}\n")
-
-
-file_open = tk.Button(window, text="Choose Image…", command=choose_file)
-file_open.pack()
-
-ics_label = tk.Label(window, text="ICS:")
-ics_field = tk.Text(window, height=10)
-
-button_frame = tk.Frame(window)
-button_frame.pack()
-generate_button = tk.Button(button_frame, text="Generate", command=click)
-generate_button.pack(side=tk.LEFT, padx=5)
-show_ics = tk.Button(button_frame, text="Show the ICS", command=toggle_ics)
-show_ics.config(state="disabled")
-show_ics.pack(side=tk.LEFT, padx=5)
-
-progress_bar = ttk.Progressbar(window, mode='indeterminate')
-
-window.mainloop()
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec())
