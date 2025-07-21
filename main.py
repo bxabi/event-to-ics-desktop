@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QApplication, QWidget, QLabel, QTextEdit, QPushButton, QVBoxLayout,
     QHBoxLayout, QFileDialog, QMessageBox, QProgressBar, QMenu
 )
-from PyQt6.QtGui import QIcon, QDragEnterEvent, QDropEvent, QAction
+from PyQt6.QtGui import QIcon, QDragEnterEvent, QDropEvent, QAction, QPixmap
 from PyQt6.QtCore import Qt, pyqtSignal, QObject, QThread
 
 from ai import ask_gpt
@@ -30,11 +30,12 @@ class Worker(QObject):
             self.finished.emit(str(e), False)
 
 
-class DropTextEdit(QTextEdit):
+class DropLabel(QLabel):
     fileDropped = pyqtSignal(str)
+    fileClicked = pyqtSignal()
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.setAcceptDrops(True)
 
     def dragEnterEvent(self, event: QDragEnterEvent):
@@ -51,6 +52,11 @@ class DropTextEdit(QTextEdit):
                 self.fileDropped.emit(file_path)
         else:
             super().dropEvent(event)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.fileClicked.emit()
+        super().mousePressEvent(event)
 
 
 def open_ics_file(ics_file_path):
@@ -78,9 +84,8 @@ class MainWindow(QWidget):
 
         self.event_label = QLabel("Event Description:")
         layout.addWidget(self.event_label)
-        self.event_field = DropTextEdit()
+        self.event_field = QTextEdit()
         layout.addWidget(self.event_field)
-        self.event_field.fileDropped.connect(self.on_file_dropped)
 
         self.reminder_label = QLabel("Reminder:")
         layout.addWidget(self.reminder_label)
@@ -88,9 +93,13 @@ class MainWindow(QWidget):
         self.reminder_field.setFixedHeight(40)
         layout.addWidget(self.reminder_field)
 
-        self.file_button = QPushButton("Choose Image…")
-        self.file_button.clicked.connect(self.choose_file)
-        layout.addWidget(self.file_button)
+        self.image_preview = DropLabel()
+        self.image_preview.setText("Drop an image here")
+        self.image_preview.setFixedHeight(100)
+        self.image_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image_preview.fileDropped.connect(self.on_file_dropped)
+        self.image_preview.fileClicked.connect(self.choose_file)
+        layout.addWidget(self.image_preview)
 
         self.ics_label = QLabel("ICS:")
         self.ics_field = QTextEdit()
@@ -134,11 +143,27 @@ class MainWindow(QWidget):
         )
         if file_path:
             self.file_path = file_path
-            self.event_field.append(f"\nFile: {file_path}\n")
+            self.set_image_preview()
 
     def on_file_dropped(self, file_path):
         self.file_path = file_path
-        self.event_field.append(f"\nFile: {file_path}\n")
+        self.set_image_preview()
+
+    def set_image_preview(self):
+        pixmap = QPixmap(self.file_path)
+        if not pixmap.isNull():
+            self.image_preview.setPixmap(
+                pixmap.scaled(
+                    self.image_preview.size(),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation
+                )
+            )
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self.file_path:
+            self.set_image_preview()
 
     def generate_click(self):
         self.generate_button.setEnabled(False)
