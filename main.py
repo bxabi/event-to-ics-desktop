@@ -3,18 +3,18 @@ import os
 import platform
 import subprocess
 
-from PyQt6.QtWidgets import (
+from PySide6.QtWidgets import (
     QApplication, QWidget, QLabel, QTextEdit, QPushButton, QVBoxLayout,
     QHBoxLayout, QFileDialog, QMessageBox, QProgressBar, QMenu
 )
-from PyQt6.QtGui import QIcon, QDragEnterEvent, QDropEvent, QAction, QPixmap
-from PyQt6.QtCore import Qt, pyqtSignal, QObject, QThread
+from PySide6.QtGui import QIcon, QDragEnterEvent, QDropEvent, QAction, QPixmap
+from PySide6.QtCore import Qt, Signal as signal, QObject, QThread
 
 from ai import ask_gpt
 
 
 class Worker(QObject):
-    finished = pyqtSignal(str, bool)
+    finished = signal(str, bool)
 
     def __init__(self, text, reminder, file_path):
         super().__init__()
@@ -31,8 +31,8 @@ class Worker(QObject):
 
 
 class DropLabel(QLabel):
-    fileDropped = pyqtSignal(str)
-    fileClicked = pyqtSignal()
+    fileDropped = signal(str)
+    fileClicked = signal()
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
