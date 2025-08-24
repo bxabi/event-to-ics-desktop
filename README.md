@@ -1,6 +1,6 @@
 Enter an event description, push the button and get an event in your calendar.
 
-![event-ai](https://raw.githubusercontent.com/bxabi/event-to-ics-desktop/blob/main/screenshot.png)
+![event-ai](screenshot.png)
 
 There are 2 GUI version available, you can either use tkinter or QT.
 QT has more features, but if you don't yet use it, it is a large package to install.
