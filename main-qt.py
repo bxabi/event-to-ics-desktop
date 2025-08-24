@@ -83,7 +83,7 @@ class MainWindow(QWidget):
         layout.addWidget(self.reminder_field)
 
         self.image_preview = DropLabel()
-        self.image_preview.setText("Drop an image here")
+        self.image_preview.setText("Drop an image here or Click to open file.")
         self.image_preview.setFixedHeight(100)
         self.image_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.image_preview.fileDropped.connect(self.on_file_dropped)

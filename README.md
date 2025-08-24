@@ -1,9 +1,12 @@
 Enter an event description, push the button and get an event in your calendar.
 
-![event-ai](https://github.com/user-attachments/assets/546e1ad1-75a1-49e9-9b8f-bc527b8d3068)
+![event-ai](https://raw.githubusercontent.com/bxabi/event-to-ics-desktop/blob/main/screenshot.png)
 
 There are 2 GUI version available, you can either use tkinter or QT.
-So install one of them: 
+QT has more features, but if you don't yet use it, it is a large package to install.
+Tkinter looks less good but it is small. It needs the tkinter package to be installed besides the pytho requirements.
+
+So run one of them: 
 - pip install -r requirements-tkinter.txt
 - OR
 - pip install -r requirements-QT.txt
