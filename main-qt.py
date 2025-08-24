@@ -1,20 +1,20 @@
 import sys
 import os
-import platform
-import subprocess
+import threading
 
 from PySide6.QtWidgets import (
     QApplication, QWidget, QLabel, QTextEdit, QPushButton, QVBoxLayout,
     QHBoxLayout, QFileDialog, QMessageBox, QProgressBar, QMenu
 )
 from PySide6.QtGui import QIcon, QDragEnterEvent, QDropEvent, QAction, QPixmap
-from PySide6.QtCore import Qt, Signal as signal, QObject, QThread
+from PySide6.QtCore import Qt, Signal, QObject
 
 from ai import ask_gpt
+from ui_independent import add_to_calendar
 
 
 class Worker(QObject):
-    finished = signal(str, bool)
+    finished = Signal(str, bool)
 
     def __init__(self, text, reminder, file_path):
         super().__init__()
@@ -29,10 +29,9 @@ class Worker(QObject):
         except Exception as e:
             self.finished.emit(str(e), False)
 
-
 class DropLabel(QLabel):
-    fileDropped = signal(str)
-    fileClicked = signal()
+    fileDropped = Signal(str)
+    fileClicked = Signal()
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -59,18 +58,6 @@ class DropLabel(QLabel):
         super().mousePressEvent(event)
 
 
-def open_ics_file(ics_file_path):
-    os_name = platform.system()
-    if os_name == 'Windows':
-        subprocess.call(['start', ics_file_path], shell=True)
-    elif os_name == 'Darwin':
-        subprocess.call(['open', ics_file_path])
-    elif os_name == 'Linux':
-        subprocess.call(['xdg-open', ics_file_path])
-    else:
-        raise ValueError("Unsupported operating system: " + os_name)
-
-
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
@@ -85,11 +72,13 @@ class MainWindow(QWidget):
         self.event_label = QLabel("Event Description:")
         layout.addWidget(self.event_label)
         self.event_field = QTextEdit()
+        self.event_field.setAcceptDrops(False)
         layout.addWidget(self.event_field)
 
         self.reminder_label = QLabel("Reminder:")
         layout.addWidget(self.reminder_label)
         self.reminder_field = QTextEdit()
+        self.reminder_field.setAcceptDrops(False)
         self.reminder_field.setFixedHeight(40)
         layout.addWidget(self.reminder_field)
 
@@ -166,6 +155,7 @@ class MainWindow(QWidget):
             self.set_image_preview()
 
     def generate_click(self):
+        QApplication.setOverrideCursor(Qt.WaitCursor)
         self.generate_button.setEnabled(False)
         self.show_ics.setEnabled(False)
         self.progress_bar.setVisible(True)
@@ -173,31 +163,22 @@ class MainWindow(QWidget):
 
         text = self.event_field.toPlainText()
         reminder = self.reminder_field.toPlainText()
+
         self.worker = Worker(text, reminder, self.file_path)
-        self.thread = QThread()
-        self.worker.moveToThread(self.thread)
-        self.thread.started.connect(self.worker.run)
         self.worker.finished.connect(self.on_finished)
-        self.worker.finished.connect(self.thread.quit)
-        self.worker.finished.connect(self.worker.deleteLater)
-        self.thread.finished.connect(self.thread.deleteLater)
+        self.thread = threading.Thread(target=self.worker.run)
         self.thread.start()
 
     def on_finished(self, result, success):
         self.progress_bar.setVisible(False)
+        QApplication.restoreOverrideCursor()
         self.generate_button.setEnabled(True)
         self.show_ics.setEnabled(True)
         if success:
             self.ics_field.setPlainText(result)
-            self.add_to_calendar()
+            add_to_calendar(result)
         else:
             QMessageBox.critical(self, "Error", result)
-
-    def add_to_calendar(self):
-        tmp_file = os.path.expanduser("~") + "/.event-ai.ics"
-        with open(tmp_file, 'w') as f:
-            f.write(self.ics_field.toPlainText())
-        open_ics_file(tmp_file)
 
     def toggle_ics(self):
         visible = not self.ics_field.isVisible()
