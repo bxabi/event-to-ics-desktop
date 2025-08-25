@@ -1,67 +1,14 @@
-import datetime
 import os
-import platform
-import subprocess
 import threading
 import tkinter as tk
 from tkinter import messagebox, filedialog
 import tkinter.ttk as ttk
-import base64
 
+from PIL import Image, ImageTk
 from tkinterdnd2 import DND_FILES, TkinterDnD
-from openai import OpenAI
 
-tmpFile = os.path.expanduser("~") + "/.event-ai.ics"
-
-if os.path.exists('.env'):
-    with open('.env') as file:
-        for line in file:
-            line = line.strip()
-            if line and not line.startswith('#'):
-                key, value = line.split('=', 1)
-                os.environ[key.strip()] = value.strip()
-
-
-def ask_gpt(text, reminder):
-    prompt = ("Create an ics file from the following event description. I only need the content of the ics file, "
-              "no additional characters, no markdown, no ```plaintext")
-    prompt += "Today's date is " + str(datetime.date.today()) + ". "
-    prompt += "My time zone is " + str(datetime.datetime.now().astimezone().tzinfo) + ". "
-    prompt += "The event: " + text + ". "
-    if reminder != "":
-        prompt += "The reminder: " + reminder
-    else:
-        prompt += "No reminder"
-
-    messages = [{"role": "user",
-                 "content": [
-                     {"type": "text", "text": prompt},
-                 ]}]
-
-    if file_path != "":
-        with open(file_path, "rb") as image_file:
-            base64_image = base64.b64encode(image_file.read()).decode('utf-8')
-        image_url = f"data:image/png;base64,{base64_image}"
-        messages[0]["content"].append({"type": "image_url", "image_url": {"url": image_url}})
-
-    client = OpenAI()  # The key is taken from os.environ.get("OPENAI_API_KEY")
-    chat_completion = client.chat.completions.create(model="gpt-4.1", messages=messages)
-    return chat_completion.choices[0].message.content
-
-
-def open_ics_file(ics_file_path):
-    os_name = platform.system()
-    if os_name == 'Windows':
-        command = ['start', ics_file_path]
-        subprocess.call(command, shell=True)
-    elif os_name == 'Darwin':  # macOS
-        command = ['open', ics_file_path]
-        subprocess.call(command)
-    elif os_name == 'Linux':
-        command = ['xdg-open', ics_file_path]
-        subprocess.call(command)
-    else:
-        raise ValueError("Unsupported operating system: " + os_name)
+from ai import ask_gpt
+from ui_independent import add_to_calendar
 
 
 def click():
@@ -74,8 +21,9 @@ def click():
         text = event_field.get("1.0", tk.END)
         reminder = reminder_field.get("1.0", tk.END)
         success = False
+        response = None
         try:
-            response = ask_gpt(text, reminder)
+            response = ask_gpt(text, reminder, file_path)
             window.after(0, lambda: ics_field.replace("1.0", tk.END, response))
             success = True
         except Exception as e:
@@ -84,39 +32,34 @@ def click():
             window.after(0, lambda: messagebox.showerror("Error", err))
 
         finally:
-            window.after(0, cleanup(success))
+            window.after(0, cleanup(success, response))
 
-    def cleanup(success: bool):
+    def cleanup(success: bool, ics_content: str):
         progress_bar.stop()
         progress_bar.pack_forget()
         generate_button.config(state="normal")
         show_ics.config(state="normal")
         if success:
-            add_to_calendar()
+            add_to_calendar(ics_content)
 
     thread = threading.Thread(target=threaded_process)
     thread.start()
 
 
-def add_to_calendar():
-    with open(tmpFile, 'w') as f:
-        f.write(ics_field.get("1.0", tk.END))
-    open_ics_file(tmpFile)
-
-
 window = TkinterDnD.Tk()
 window.title("Text to ICS")
+window.geometry("500x650")
 icon = tk.PhotoImage(file="icon.png")
 window.iconphoto(True, icon)
 
 event_label = tk.Label(window, text="Event Description:")
 event_label.pack(pady=(10, 0))
 event_field = tk.Text(window, height=10)
-event_field.pack()
+event_field.pack(padx=10, expand=True, fill=tk.BOTH)
 reminder_label = tk.Label(window, text="Reminder:")
 reminder_label.pack(pady=(10, 0))
 reminder_field = tk.Text(window, height=2)
-reminder_field.pack()
+reminder_field.pack(padx=10, fill=tk.X)
 
 
 def select_all(event):
@@ -133,21 +76,18 @@ def toggle_ics():
         show_ics.config(text="Show the ICS")
     else:
         ics_label.pack(pady=(10, 0))
-        ics_field.pack()
+        ics_field.pack(padx=10, expand=True, fill=tk.BOTH)
         show_ics.config(text="Hide the ICS")
-
-
-event_field.bind('<Control-a>', select_all)
-event_field.bind('<Control-A>', select_all)
-
-event_menu = tk.Menu(window, tearoff=0)
-event_menu.add_command(label="Paste", command=lambda: event_field.event_generate("<<Paste>>"))
 
 
 def show_event_menu(event):
     event_menu.tk_popup(event.x_root, event.y_root)
 
 
+event_menu = tk.Menu(window, tearoff=0)
+event_menu.add_command(label="Paste", command=lambda: event_field.event_generate("<<Paste>>"))
+event_field.bind('<Control-a>', select_all)
+event_field.bind('<Control-A>', select_all)
 event_field.bind("<Button-3>", show_event_menu)
 
 file_path = ""
@@ -155,31 +95,61 @@ file_path = ""
 
 def on_drop(event):
     global file_path
-    file_path = event.data  # This is the path of the dropped file
-    print("Dropped file:", file_path)
-    event_field.insert(tk.END, f"\nFile: {file_path}\n")
+    file_path = event.data.strip('{}')
+    set_image_preview()
 
 
-event_field.drop_target_register(DND_FILES)
-event_field.dnd_bind('<<Drop>>', on_drop)
-
-
-def choose_file():
+def choose_file(event=None):
     global file_path
-    file_path = filedialog.askopenfilename(
-        filetypes=[("Image files", "*.jpg *.png *.jpeg *.JPG *.PNG *.JPEG")], initialdir= os.path.expanduser("~") + "/Desktop"
+    path = filedialog.askopenfilename(
+        filetypes=[("Image files", "*.jpg *.png *.jpeg *.JPG *.PNG *.JPEG")],
+        initialdir=os.path.expanduser("~") + "/Desktop"
     )
-    event_field.insert(tk.END, f"\nFile: {file_path}\n")
+    if path:
+        file_path = path
+        set_image_preview()
 
 
-file_open = tk.Button(window, text="Choose Image…", command=choose_file)
-file_open.pack()
+def set_image_preview():
+    if not file_path:
+        return
+    try:
+        image_frame.update_idletasks()
+        width = image_frame.winfo_width()
+        height = image_frame.winfo_height()
+
+        img = Image.open(file_path)
+        resample_filter = Image.Resampling.LANCZOS if hasattr(Image, 'Resampling') else Image.ANTIALIAS
+        img.thumbnail((width, height), resample_filter)
+
+        photo = ImageTk.PhotoImage(img)
+        image_preview.config(image=photo, text="")
+        image_preview.image = photo
+    except Exception as e:
+        image_preview.config(text="Error loading image", image=None)
+        print(e)
+
+
+def on_frame_configure(event):
+    set_image_preview()
+
+
+image_frame = tk.Frame(window, height=100, relief=tk.SUNKEN, borderwidth=1)
+image_frame.pack(expand=True, fill=tk.BOTH, padx=10, pady=5)
+image_frame.pack_propagate(False)
+
+image_preview = tk.Label(image_frame, text="Drop an image here or Click to open file.")
+image_preview.pack(expand=True, fill=tk.BOTH)
+image_preview.drop_target_register(DND_FILES)
+image_preview.dnd_bind('<<Drop>>', on_drop)
+image_preview.bind("<Button-1>", choose_file)
+image_frame.bind("<Configure>", on_frame_configure)
 
 ics_label = tk.Label(window, text="ICS:")
 ics_field = tk.Text(window, height=10)
 
 button_frame = tk.Frame(window)
-button_frame.pack()
+button_frame.pack(pady=5)
 generate_button = tk.Button(button_frame, text="Generate", command=click)
 generate_button.pack(side=tk.LEFT, padx=5)
 show_ics = tk.Button(button_frame, text="Show the ICS", command=toggle_ics)
