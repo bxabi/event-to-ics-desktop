@@ -36,5 +36,5 @@ def ask_gpt(text, reminder, file_path):
         messages[0]["content"].append({"type": "image_url", "image_url": {"url": image_url}})
 
     client = OpenAI()  # The key is taken from os.environ.get("OPENAI_API_KEY")
-    chat_completion = client.chat.completions.create(model="gpt-4.1", messages=messages)
+    chat_completion = client.chat.completions.create(model="gpt-5-mini", messages=messages)
     return chat_completion.choices[0].message.content
