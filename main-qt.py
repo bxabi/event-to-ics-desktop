@@ -5,9 +5,9 @@ import tempfile
 
 from PySide6.QtWidgets import (
     QApplication, QWidget, QLabel, QTextEdit, QPushButton, QVBoxLayout,
-    QHBoxLayout, QFileDialog, QMessageBox, QProgressBar, QMenu
+    QHBoxLayout, QFileDialog, QMessageBox, QProgressBar, QMenu, QSizePolicy
 )
-from PySide6.QtGui import QIcon, QDragEnterEvent, QDropEvent, QAction, QPixmap, QKeySequence, QImage
+from PySide6.QtGui import QIcon, QDragEnterEvent, QDropEvent, QAction, QPixmap, QKeySequence, QImage, QPainter
 from PySide6.QtCore import Qt, Signal, QObject, QEvent
 
 from ai import ask_gpt
@@ -31,13 +31,15 @@ class Worker(QObject):
             self.finished.emit(str(e), False)
 
 
-class DropLabel(QLabel):
+class ImageLabel(QLabel):
     fileDropped = Signal(str)
     fileClicked = Signal()
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._pixmap = QPixmap()
         self.setAcceptDrops(True)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
     def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls():
@@ -58,6 +60,23 @@ class DropLabel(QLabel):
         if event.button() == Qt.MouseButton.LeftButton:
             self.fileClicked.emit()
         super().mousePressEvent(event)
+
+    def setPixmap(self, pixmap):
+        self._pixmap = pixmap
+        self.update()  # Trigger a repaint
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+
+        if not self._pixmap.isNull():
+            # Scale pixmap to fit the label, keeping aspect ratio
+            scaled_pixmap = self._pixmap.scaled(self.size(), Qt.AspectRatioMode.KeepAspectRatio,
+                                                Qt.TransformationMode.SmoothTransformation)
+            painter = QPainter(self)
+            # Center the scaled pixmap within the label
+            x = (self.width() - scaled_pixmap.width()) / 2
+            y = (self.height() - scaled_pixmap.height()) / 2
+            painter.drawPixmap(int(x), int(y), scaled_pixmap)
 
 
 class MainWindow(QWidget):
@@ -88,11 +107,12 @@ class MainWindow(QWidget):
         self.event_field.installEventFilter(self)
         self.reminder_field.installEventFilter(self)
 
-        self.image_preview = DropLabel()
+        self.image_preview = ImageLabel()
         self.image_preview.setText("Drop an image here or Click to open file.")
         self.image_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.image_preview.fileDropped.connect(self.on_file_dropped)
         self.image_preview.fileClicked.connect(self.choose_file)
+        self.image_preview.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         layout.addWidget(self.image_preview)
 
         self.ics_label = QLabel("ICS:")
@@ -189,18 +209,9 @@ class MainWindow(QWidget):
     def set_image_preview(self):
         pixmap = QPixmap(self.file_path)
         if not pixmap.isNull():
-            self.image_preview.setPixmap(
-                pixmap.scaled(
-                    self.image_preview.size(),
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation
-                )
-            )
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        if self.file_path:
-            self.set_image_preview()
+            self.image_preview.setPixmap(pixmap)
+        else:
+            self.image_preview.setText("Drop an image here or Click to open file.")
 
     def generate_click(self):
         QApplication.setOverrideCursor(Qt.WaitCursor)
@@ -233,7 +244,6 @@ class MainWindow(QWidget):
         self.ics_field.setVisible(visible)
         self.ics_label.setVisible(visible)
         self.show_ics.setText("Hide the ICS" if visible else "Show the ICS")
-        self.adjustSize()
 
 
 if __name__ == "__main__":
