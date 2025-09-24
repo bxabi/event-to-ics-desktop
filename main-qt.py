@@ -1,13 +1,14 @@
 import sys
 import os
 import threading
+import tempfile
 
 from PySide6.QtWidgets import (
     QApplication, QWidget, QLabel, QTextEdit, QPushButton, QVBoxLayout,
     QHBoxLayout, QFileDialog, QMessageBox, QProgressBar, QMenu
 )
-from PySide6.QtGui import QIcon, QDragEnterEvent, QDropEvent, QAction, QPixmap
-from PySide6.QtCore import Qt, Signal, QObject
+from PySide6.QtGui import QIcon, QDragEnterEvent, QDropEvent, QAction, QPixmap, QKeySequence, QImage
+from PySide6.QtCore import Qt, Signal, QObject, QEvent
 
 from ai import ask_gpt
 from ui_independent import add_to_calendar
@@ -28,6 +29,7 @@ class Worker(QObject):
             self.finished.emit(result, True)
         except Exception as e:
             self.finished.emit(str(e), False)
+
 
 class DropLabel(QLabel):
     fileDropped = Signal(str)
@@ -64,6 +66,7 @@ class MainWindow(QWidget):
         self.setWindowTitle("Text to ICS")
         self.setWindowIcon(QIcon("icon.png"))
         self.file_path = ""
+        self.temp_file_path = ""
         self.init_ui()
 
     def init_ui(self):
@@ -82,9 +85,11 @@ class MainWindow(QWidget):
         self.reminder_field.setFixedHeight(40)
         layout.addWidget(self.reminder_field)
 
+        self.event_field.installEventFilter(self)
+        self.reminder_field.installEventFilter(self)
+
         self.image_preview = DropLabel()
         self.image_preview.setText("Drop an image here or Click to open file.")
-        self.image_preview.setFixedHeight(100)
         self.image_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.image_preview.fileDropped.connect(self.on_file_dropped)
         self.image_preview.fileClicked.connect(self.choose_file)
@@ -121,9 +126,50 @@ class MainWindow(QWidget):
     def show_event_menu(self, pos):
         menu = QMenu(self)
         paste_action = QAction("Paste", self)
-        paste_action.triggered.connect(lambda: self.event_field.paste())
+
+        clipboard = QApplication.clipboard()
+        mime_data = clipboard.mimeData()
+
+        if mime_data.hasImage():
+            paste_action.triggered.connect(lambda: self.handle_pasted_image(clipboard.image()))
+        elif mime_data.hasText():
+            paste_action.triggered.connect(self.event_field.paste)
+        else:
+            paste_action.setEnabled(False)
+
         menu.addAction(paste_action)
         menu.exec(self.event_field.mapToGlobal(pos))
+
+    def cleanup_temp_file(self):
+        if self.temp_file_path and os.path.exists(self.temp_file_path):
+            os.remove(self.temp_file_path)
+            self.temp_file_path = ""
+
+    def closeEvent(self, event):
+        self.cleanup_temp_file()
+        super().closeEvent(event)
+
+    def eventFilter(self, source, event):
+        if (event.type() == QEvent.KeyPress and event.matches(QKeySequence.StandardKey.Paste)):
+            if source is self.event_field or source is self.reminder_field:
+                clipboard = QApplication.clipboard()
+                if clipboard.mimeData().hasImage():
+                    image = clipboard.image()
+                    if not image.isNull():
+                        self.handle_pasted_image(image)
+                        return True  # Event handled
+        return super().eventFilter(source, event)
+
+    def handle_pasted_image(self, image: QImage):
+        self.cleanup_temp_file()
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp_file:
+            self.temp_file_path = temp_file.name
+        if image.save(self.temp_file_path):
+            self.file_path = self.temp_file_path
+            self.set_image_preview()
+        else:
+            QMessageBox.warning(self, "Paste Error", "Could not save pasted image.")
+            self.cleanup_temp_file()
 
     def choose_file(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -131,10 +177,12 @@ class MainWindow(QWidget):
             "Image files (*.jpg *.png *.jpeg *.JPG *.PNG *.JPEG)"
         )
         if file_path:
+            self.cleanup_temp_file()
             self.file_path = file_path
             self.set_image_preview()
 
     def on_file_dropped(self, file_path):
+        self.cleanup_temp_file()
         self.file_path = file_path
         self.set_image_preview()
 
@@ -185,6 +233,7 @@ class MainWindow(QWidget):
         self.ics_field.setVisible(visible)
         self.ics_label.setVisible(visible)
         self.show_ics.setText("Hide the ICS" if visible else "Show the ICS")
+        self.adjustSize()
 
 
 if __name__ == "__main__":
