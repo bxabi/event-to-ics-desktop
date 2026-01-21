@@ -12,6 +12,6 @@ So run one of them:
 - pip install -r requirements-QT.txt
 
 
-- create a '.env' file and add you openai API key as OPENAI_API_KEY=...
+- create a '.env' file and add your Gemini API key as GEMINI_API_KEY=...
 
 Alternatively you can also try/use the online version: https://event-ai.bxabi.com

@@ -1,8 +1,7 @@
-import base64
 import datetime
 import os
 
-from openai import OpenAI
+import google.generativeai as genai
 
 if os.path.exists('.env'):
     with open('.env') as file:
@@ -11,6 +10,8 @@ if os.path.exists('.env'):
             if line and not line.startswith('#'):
                 key, value = line.split('=', 1)
                 os.environ[key.strip()] = value.strip()
+
+genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
 
 
 def ask_gpt(text, reminder, file_path):
@@ -24,17 +25,17 @@ def ask_gpt(text, reminder, file_path):
     else:
         prompt += "No reminder"
 
-    messages = [{"role": "user",
-                 "content": [
-                     {"type": "text", "text": prompt},
-                 ]}]
+    model = genai.GenerativeModel('gemini-2.5-flash')
 
+    content = [prompt]
+    uploaded_file = None
     if file_path != "":
-        with open(file_path, "rb") as image_file:
-            base64_image = base64.b64encode(image_file.read()).decode('utf-8')
-        image_url = f"data:image/png;base64,{base64_image}"
-        messages[0]["content"].append({"type": "image_url", "image_url": {"url": image_url}})
+        uploaded_file = genai.upload_file(file_path)
+        content.append(uploaded_file)
 
-    client = OpenAI()  # The key is taken from os.environ.get("OPENAI_API_KEY")
-    chat_completion = client.chat.completions.create(model="gpt-5-mini", messages=messages)
-    return chat_completion.choices[0].message.content
+    response = model.generate_content(content)
+
+    if uploaded_file:
+        genai.delete_file(uploaded_file.name)
+
+    return response.text
